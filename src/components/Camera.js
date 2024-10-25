@@ -11,6 +11,14 @@ const Camera = () => {
     const modelPath = process.env.PUBLIC_URL + '/my-model/model.json';
 
     useEffect(() => {
+        if (model) {
+            const interval = setInterval(detect, 500);
+            return () => clearInterval(interval);
+        }
+    }, [model]);
+
+
+    useEffect(() => {
         const loadModel = async () => {
             try {
                 const loadedModel = await tf.loadLayersModel(modelPath);
@@ -48,21 +56,21 @@ const Camera = () => {
     const detect = async () => {
         if (model && videoRef.current && videoRef.current.readyState === 4) {
             tf.tidy(() => {
-                const imgTensor = tf.browser.fromPixels(videoRef.current).toFloat();
-                const resizedTensor = tf.image.resizeBilinear(imgTensor, [224, 224]);
-                const expandedTensor = resizedTensor.expandDims(0);
-                const prediction = model.predict(expandedTensor);
+                const imgTensor = tf.browser.fromPixels(videoRef.current)
+                    .resizeBilinear([224, 224]) // Resize to match the model's input size
+                    .div(tf.scalar(255)) // Normalize pixel values if the model was trained on normalized data
+                    .expandDims(0); // Add a batch dimension
+
+                const prediction = model.predict(imgTensor);
                 const predictionData = prediction.dataSync();
 
                 const maxPredictionValue = Math.max(...predictionData);
                 const maxPredictionIndex = predictionData.indexOf(maxPredictionValue);
-
                 const className = classNames[maxPredictionIndex];
 
                 setDetection(`Erkannt: ${className} mit ${(maxPredictionValue * 100).toFixed(2)}% Wahrscheinlichkeit`);
             });
         }
-        setTimeout(detect, 500);
     };
 
     useEffect(() => {
@@ -84,6 +92,7 @@ const Camera = () => {
                     }}
                 />
             </div>
+            <p className="text-warning">{detection}</p>
         </div>
     );
 };
