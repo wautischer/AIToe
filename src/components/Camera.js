@@ -5,28 +5,39 @@ import '@tensorflow/tfjs';
 const modelURL = process.env.PUBLIC_URL + '/my-model/home/model.json';
 const metadataURL = process.env.PUBLIC_URL + '/my-model/home/metadata.json';
 
-const Camera = () => {
+const Camera = ({ onSelectionComplete }) => {
     const webcamContainerRef = useRef(null);
     const [predictions, setPredictions] = useState([]);
     const [isModelLoaded, setIsModelLoaded] = useState(false);
+    const [countdown, setCountdown] = useState(0);
     const modelRef = useRef(null);
     const webcamRef = useRef(null);
+    const countdownRef = useRef(0);
+
+    useEffect(() => {
+        init();
+
+        return () => {
+            if (webcamRef.current) {
+                webcamRef.current.stop();
+            }
+        };
+    }, []);
 
     const init = async () => {
         try {
-            // Load the model
             modelRef.current = await tmImage.load(modelURL, metadataURL);
             setIsModelLoaded(true);
+            console.log("Modell erfolgreich geladen.");
 
             const flip = true;
             webcamRef.current = new tmImage.Webcam(400, 400, flip);
             await webcamRef.current.setup();
 
-            // Check if webcam is ready before calling play
             if (webcamRef.current && typeof webcamRef.current.play === 'function') {
                 await webcamRef.current.play();
             } else {
-                console.error("Webcam play function is not available.");
+                console.error("Die 'play'-Funktion der Webcam ist nicht verfügbar.");
                 return;
             }
 
@@ -37,7 +48,7 @@ const Camera = () => {
 
             requestAnimationFrame(loop);
         } catch (error) {
-            console.warn("Non-critical error during webcam play:", error);
+            console.warn("Nicht-kritischer Fehler beim Initialisieren von Modell und Webcam:", error);
         }
     };
 
@@ -56,26 +67,49 @@ const Camera = () => {
         }
     };
 
-    useEffect(() => {
-        init();
+    const startTimer = () => {
+        setCountdown(5);
+        countdownRef.current = 5;
+        console.log("Timer gestartet.");
 
-        return () => {
-            if (webcamRef.current) {
-                webcamRef.current.stop();
+        const timerInterval = setInterval(() => {
+            countdownRef.current -= 1;
+            setCountdown(countdownRef.current);
+
+            if (countdownRef.current === 0) {
+                clearInterval(timerInterval);
+                console.log("Countdown beendet. Vorhersage wird erfasst...");
+                capturePrediction();
             }
-        };
-    }, []);
+        }, 1000);
+    };
+
+    const capturePrediction = async () => {
+        if (modelRef.current && webcamRef.current) {
+            const prediction = await modelRef.current.predict(webcamRef.current.canvas);
+            setPredictions(prediction);
+
+            const topPrediction = prediction.reduce((best, current) =>
+                current.probability > best.probability ? current : best
+            );
+
+            console.log("Erfasste Vorhersage:", topPrediction);
+            if (topPrediction) {
+                onSelectionComplete(topPrediction.className);
+            } else {
+                console.warn("Keine Vorhersage getroffen.");
+            }
+        }
+    };
 
     return (
         <div>
             <div id="webcam-container" ref={webcamContainerRef}></div>
-            <div id="label-container">
-                {predictions.map((pred, index) => (
-                    <div key={index}>
-                        {pred.className}: {pred.probability.toFixed(2)}
-                    </div>
-                ))}
-            </div>
+
+            <button onClick={startTimer} className="btn btn-primary mt-3">
+                Start 5s Timer
+            </button>
+            {countdown > 0 && <p>Countdown: <b className="text-danger">{countdown}</b></p>}
         </div>
     );
 };
