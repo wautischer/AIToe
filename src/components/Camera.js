@@ -1,98 +1,81 @@
 import React, { useEffect, useRef, useState } from 'react';
-import * as tf from '@tensorflow/tfjs';
+import * as tmImage from '@teachablemachine/image';
+import '@tensorflow/tfjs';
 
-const classNames = ['1_finger', '2_finger', '3_finger', 'keine_finger'];
+const modelURL = process.env.PUBLIC_URL + '/my-model/home/model.json';
+const metadataURL = process.env.PUBLIC_URL + '/my-model/home/metadata.json';
 
 const Camera = () => {
-    const videoRef = useRef(null);
-    const [model, setModel] = useState(null);
-    const [detection, setDetection] = useState(null);
+    const webcamContainerRef = useRef(null);
+    const [predictions, setPredictions] = useState([]);
+    const [isModelLoaded, setIsModelLoaded] = useState(false);
+    const modelRef = useRef(null);
+    const webcamRef = useRef(null);
 
-    const modelPath = process.env.PUBLIC_URL + '/my-model/model.json';
+    const init = async () => {
+        try {
+            // Load the model
+            modelRef.current = await tmImage.load(modelURL, metadataURL);
+            setIsModelLoaded(true);
 
-    useEffect(() => {
-        if (model) {
-            const interval = setInterval(detect, 500);
-            return () => clearInterval(interval);
+            const flip = true;
+            webcamRef.current = new tmImage.Webcam(400, 400, flip);
+            await webcamRef.current.setup();
+
+            // Check if webcam is ready before calling play
+            if (webcamRef.current && typeof webcamRef.current.play === 'function') {
+                await webcamRef.current.play();
+            } else {
+                console.error("Webcam play function is not available.");
+                return;
+            }
+
+            if (webcamContainerRef.current && webcamRef.current.canvas) {
+                webcamContainerRef.current.innerHTML = '';
+                webcamContainerRef.current.appendChild(webcamRef.current.canvas);
+            }
+
+            requestAnimationFrame(loop);
+        } catch (error) {
+            console.warn("Non-critical error during webcam play:", error);
         }
-    }, [model]);
+    };
 
+    const loop = async () => {
+        if (webcamRef.current) {
+            webcamRef.current.update();
+            await predict();
+            requestAnimationFrame(loop);
+        }
+    };
 
-    useEffect(() => {
-        const loadModel = async () => {
-            try {
-                const loadedModel = await tf.loadLayersModel(modelPath);
-                setModel(loadedModel);
-            } catch (error) {
-                console.error("Error loading model:", error);
-            }
-        };
-
-        loadModel();
-    }, [modelPath]);
-
-    useEffect(() => {
-        const getCameraStream = async () => {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-                if (videoRef.current) {
-                    videoRef.current.srcObject = stream;
-                }
-            } catch (error) {
-                console.error("Error accessing camera: ", error);
-            }
-        };
-
-        getCameraStream();
-
-        return () => {
-            if (videoRef.current && videoRef.current.srcObject) {
-                const tracks = videoRef.current.srcObject.getTracks();
-                tracks.forEach(track => track.stop());
-            }
-        };
-    }, []);
-
-    const detect = async () => {
-        if (model && videoRef.current && videoRef.current.readyState === 4) {
-            tf.tidy(() => {
-                const imgTensor = tf.browser.fromPixels(videoRef.current)
-                    .resizeBilinear([224, 224]) // Resize to match the model's input size
-                    .div(tf.scalar(255)) // Normalize pixel values if the model was trained on normalized data
-                    .expandDims(0); // Add a batch dimension
-
-                const prediction = model.predict(imgTensor);
-                const predictionData = prediction.dataSync();
-
-                const maxPredictionValue = Math.max(...predictionData);
-                const maxPredictionIndex = predictionData.indexOf(maxPredictionValue);
-                const className = classNames[maxPredictionIndex];
-
-                setDetection(`Erkannt: ${className} mit ${(maxPredictionValue * 100).toFixed(2)}% Wahrscheinlichkeit`);
-            });
+    const predict = async () => {
+        if (modelRef.current && webcamRef.current) {
+            const prediction = await modelRef.current.predict(webcamRef.current.canvas);
+            setPredictions(prediction);
         }
     };
 
     useEffect(() => {
-        if (model) {
-            detect();
-        }
-    }, [model]);
+        init();
+
+        return () => {
+            if (webcamRef.current) {
+                webcamRef.current.stop();
+            }
+        };
+    }, []);
 
     return (
-        <div className="d-flex justify-content-center align-items-center" style={{height: '100vh'}}>
-            <div className="overflow-hidden rounded-5" style={{width: '100%', height: '500px', position: 'relative'}}>
-                <video
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    className="w-100 h-100"
-                    style={{
-                        objectFit: 'cover'
-                    }}
-                />
+        <div>
+            <div id="webcam-container" ref={webcamContainerRef}></div>
+            <div id="label-container">
+                {predictions.map((pred, index) => (
+                    <div key={index}>
+                        {pred.className}: {pred.probability.toFixed(2)}
+                    </div>
+                ))}
             </div>
-            <p className="text-warning">{detection}</p>
         </div>
     );
 };
